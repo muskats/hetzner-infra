@@ -109,3 +109,4 @@ jobs:
           echo "Posting comment to PR #${PR_NUMBER} in ${REPO}"
           post_resp=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" -H "Content-Type: application/json" -X POST -d "{\"body\": $(jq -Rn --arg b "$comment_body" '$b') }" "https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments")
           echo "Posted comment response: $post_resp"
+
