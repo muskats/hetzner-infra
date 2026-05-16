@@ -1,0 +1,111 @@
+name: Post Terraform Cloud Plan to PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  post-plan:
+    name: Post TFC Plan
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    env:
+      TF_API_URL: https://app.terraform.io/api/v2
+      TF_ORG: SM_Cloud_1
+      TF_WORKSPACE: hetzner-infra
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Find Terraform Cloud run for commit and post plan link
+        env:
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_SHA: ${{ github.sha }}
+          TF_API_URL: ${{ env.TF_API_URL }}
+          TF_ORG: ${{ env.TF_ORG }}
+          TF_WORKSPACE: ${{ env.TF_WORKSPACE }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TF_API_TOKEN}" ]; then
+            echo "TF_API_TOKEN secret is required to query Terraform Cloud"
+            exit 1
+          fi
+
+          auth_header=( -H "Authorization: Bearer ${TF_API_TOKEN}" -H "Content-Type: application/vnd.api+json" )
+
+          echo "Fetching workspace '${TF_WORKSPACE}' in org '${TF_ORG}'"
+          ws_resp=$(curl -s "${auth_header[@]}" "${TF_API_URL}/organizations/${TF_ORG}/workspaces/${TF_WORKSPACE}")
+          WS_ID=$(echo "$ws_resp" | jq -r '.data.id')
+          if [ -z "$WS_ID" ] || [ "$WS_ID" = "null" ]; then
+            echo "Workspace not found. Response: $ws_resp"
+            exit 1
+          fi
+          echo "Workspace ID: $WS_ID"
+
+          found_run=""
+          max_attempts=24
+          attempt=0
+          echo "Polling for run matching commit ${GITHUB_SHA} (up to $max_attempts attempts)"
+          while [ $attempt -lt $max_attempts ] && [ -z "$found_run" ]; do
+            attempt=$((attempt+1))
+            echo "Attempt $attempt: listing recent runs..."
+            runs=$(curl -s "${auth_header[@]}" "${TF_API_URL}/runs?filter[workspace]=${WS_ID}&page[size]=20")
+            for run_id in $(echo "$runs" | jq -r '.data[].id'); do
+              echo "Checking run $run_id"
+              run_json=$(curl -s "${auth_header[@]}" "${TF_API_URL}/runs/${run_id}?include=configuration-version,plan")
+              # Try common ingress attribute keys for commit SHA
+              commit_sha=$(echo "$run_json" | jq -r '.included[]? | select(.type=="configuration-versions") | .attributes.ingress-attributes.vcs-revision // .attributes.ingress-attributes.commit_sha // .attributes.ingress-attributes."vcs-revision" // empty' | head -n1)
+              if [ -n "$commit_sha" ] && [ "$commit_sha" = "$GITHUB_SHA" ]; then
+                found_run=$run_id
+                found_run_json="$run_json"
+                break
+              fi
+            done
+            if [ -z "$found_run" ]; then
+              echo "Run for commit not found yet. Sleeping 5s..."
+              sleep 5
+            fi
+          done
+
+          if [ -z "$found_run" ]; then
+            echo "No Terraform Cloud run found for commit ${GITHUB_SHA} after polling. Exiting."
+            exit 0
+          fi
+
+          echo "Found run $found_run"
+          run_status=$(echo "$found_run_json" | jq -r '.data.attributes.status')
+          run_message=$(echo "$found_run_json" | jq -r '.data.attributes.message // empty')
+          run_url="https://app.terraform.io/app/${TF_ORG}/workspaces/${TF_WORKSPACE}/runs/${found_run}"
+
+          # Try to find a plan id in included resources
+          plan_id=$(echo "$found_run_json" | jq -r '.included[]? | select(.type=="plans") | .id' | head -n1 || true)
+
+          comment_body="Terraform Cloud run for commit ${GITHUB_SHA}\n\n- Run: ${run_url}\n- Status: ${run_status}\n"
+          if [ -n "$run_message" ]; then
+            comment_body+="- Message: ${run_message}\n"
+          fi
+
+          if [ -n "$plan_id" ]; then
+            comment_body+="- Plan ID: ${plan_id}\n"
+            # Attempt to fetch plan details (may require additional endpoints or blob download)
+            comment_body+="\nYou can view the full plan and details in Terraform Cloud: ${run_url}\n"
+          else
+            comment_body+="\nPlan not available via API response. View run for details: ${run_url}\n"
+          fi
+
+          # Post comment to PR
+          echo "Posting comment to PR #${PR_NUMBER} in ${REPO}"
+          post_resp=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" -H "Content-Type: application/json" -X POST -d "{\"body\": $(jq -Rn --arg b "$comment_body" '$b') }" "https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments")
+          echo "Posted comment response: $post_resp"
