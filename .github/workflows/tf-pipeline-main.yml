@@ -74,11 +74,31 @@ jobs:
             runs=$(curl -s "${auth_header[@]}" \
               "${TF_API_URL}/runs?filter[workspace]=${WS_ID}&page[size]=20")
 
-            for run_id in $(echo "$runs" | jq -r '.data[].id'); do
+            if ! echo "$runs" | jq -e '.data' >/dev/null 2>&1; then
+              echo "Failed to fetch runs:"
+              echo "$runs"
+              exit 1
+            fi
+
+            run_ids=$(echo "$runs" | jq -r '.data[]?.id')
+
+            if [ -z "$run_ids" ]; then
+              echo "No runs returned yet"
+              sleep 5
+              continue
+            fi
+
+            for run_id in $run_ids; do
 
               run_json=$(curl -s "${auth_header[@]}" \
                 "${TF_API_URL}/runs/${run_id}?include=configuration-version,plan")
 
+              if ! echo "$run_json" | jq -e '.data' >/dev/null 2>&1; then
+                echo "Failed to fetch run ${run_id}"
+                echo "$run_json"
+                continue
+              fi
+              
               commit_sha=$(echo "$run_json" | jq -r '
                 .included[]? |
                 select(.type=="configuration-versions") |
