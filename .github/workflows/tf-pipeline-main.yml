@@ -98,14 +98,18 @@ jobs:
                 echo "$run_json"
                 continue
               fi
-              
+
               commit_sha=$(echo "$run_json" | jq -r '
                 .included[]? |
                 select(.type=="configuration-versions") |
-                .attributes.ingress-attributes.vcs-revision //
-                .attributes.ingress-attributes.commit_sha //
-                empty
-              ' | head -n1)
+                (
+                  .attributes."vcs-revision" //
+                  .attributes.ingress_attributes.vcs_revision //
+                  .attributes.ingress-attributes."vcs-revision" //
+                  .attributes.ingress-attributes.commit_sha //
+                  empty
+                )
+              ' 2>/dev/null | head -n1 || true)
 
               if [ "$commit_sha" = "$GITHUB_SHA" ]; then
                 found_run="$run_id"
