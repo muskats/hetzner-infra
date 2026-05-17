@@ -11,12 +11,12 @@ variable "HCLOUD_SSH_PUBLIC" {
 
 variable "location" {
   type    = string
-  default = "hil"
+  default = "hel1"
 }
 
 variable "instance_type" {
   type    = string
-  default = "cpx22"
+  default = "cx23"
 }
 
 variable "image" {
