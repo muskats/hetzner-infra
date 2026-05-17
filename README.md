@@ -51,6 +51,7 @@ This repository follows a modular layout to separate concerns between infrastruc
 ├── templates
 │   └── cloud-init
 │       └── os-hardening.tpl   # Cloud-init bootstrap template used for initial VM hardening and baseline OS configuration
+````
 
 ---
 
@@ -61,4 +62,3 @@ This repository follows a modular layout to separate concerns between infrastruc
 > The limitation is intentional due to:
 > - Hobby project budget constraints
 > - General limitations in Hetzner infrastructure availability at the time of creating this project
->
