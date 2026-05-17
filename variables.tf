@@ -1,18 +1,12 @@
 variable "HCLOUD_TOKEN" {
   type        = string
-  description = "Hetzner Cloud API token (Terraform Cloud variable)"
+  description = "Hetzner Cloud API token."
   sensitive   = true
 }
 
 variable "HCLOUD_SSH_PUBLIC" {
   type        = string
-  description = "SSH public key. (Terraform Cloud variable)"
-}
-
-variable "HCLOUD_SSH_PRIVATE" {
-  type        = string
-  description = "SSH private key. (Terraform Cloud variable)"
-  sensitive   = true
+  description = "SSH public key."
 }
 
 variable "location" {
