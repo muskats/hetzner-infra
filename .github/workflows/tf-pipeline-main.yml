@@ -4,302 +4,64 @@ on:
   push:
     branches:
       - main
-    tags:
-      - '*'
-
-  workflow_dispatch:
-    inputs:
-      action:
-        description: 'Action to perform: apply or destroy'
-        required: true
-        default: ''
-      run_id:
-        description: 'Terraform Cloud run id (optional).'
-        required: false
-      commit_sha:
-        description: 'Commit SHA to match a run (optional).'
-        required: false
-
-permissions:
-  contents: read
-
-env:
-  TF_API_URL: https://app.terraform.io/api/v2
-  TF_ORG: SM_Cloud_1
-  TF_WORKSPACE: hetzner-infra
 
 jobs:
-  plan:
-    name: Fetch Terraform Cloud Plan
+  terraform-plan:
+    name: Terraform Plan
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Install jq
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
-
-      - name: Fetch and print Terraform Cloud plan
-        env:
-          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-          TF_API_URL: ${{ env.TF_API_URL }}
-          TF_ORG: ${{ env.TF_ORG }}
-          TF_WORKSPACE: ${{ env.TF_WORKSPACE }}
-          GITHUB_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          auth_header=(
-            -H "Authorization: Bearer ${TF_API_TOKEN}"
-            -H "Content-Type: application/vnd.api+json"
-          )
-
-          echo "Fetching workspace..."
-          ws_resp=$(curl -s "${auth_header[@]}" \
-            "${TF_API_URL}/organizations/${TF_ORG}/workspaces/${TF_WORKSPACE}")
-
-          WS_ID=$(echo "$ws_resp" | jq -r '.data.id')
-
-          if [ -z "$WS_ID" ] || [ "$WS_ID" = "null" ]; then
-            echo "Workspace not found"
-            exit 1
-          fi
-
-          echo "Looking for run matching commit ${GITHUB_SHA}"
-
-          found_run=""
-          found_plan=""
-
-          for i in {1..24}; do
-            runs=$(curl -s "${auth_header[@]}" \
-              "${TF_API_URL}/runs?filter[workspace]=${WS_ID}&page[size]=20")
-
-            if ! echo "$runs" | jq -e '.data' >/dev/null 2>&1; then
-              echo "Failed to fetch runs:"
-              echo "$runs"
-              exit 1
-            fi
-
-            run_ids=$(echo "$runs" | jq -r '.data[]?.id')
-
-            if [ -z "$run_ids" ]; then
-              echo "No runs returned yet"
-              sleep 5
-              continue
-            fi
-
-            for run_id in $run_ids; do
-
-              run_json=$(curl -s "${auth_header[@]}" \
-                "${TF_API_URL}/runs/${run_id}?include=configuration-version,plan")
-
-              if ! echo "$run_json" | jq -e '.data' >/dev/null 2>&1; then
-                echo "Failed to fetch run ${run_id}"
-                echo "$run_json"
-                continue
-              fi
-
-              commit_sha=$(echo "$run_json" | jq -r '
-                .included[]? |
-                select(.type=="configuration-versions") |
-                (
-                  .attributes."vcs-revision" //
-                  .attributes.ingress_attributes.vcs_revision //
-                  .attributes.ingress-attributes."vcs-revision" //
-                  .attributes.ingress-attributes.commit_sha //
-                  empty
-                )
-              ' 2>/dev/null | head -n1 || true)
-
-              if [ "$commit_sha" = "$GITHUB_SHA" ]; then
-                found_run="$run_id"
-
-                found_plan=$(echo "$run_json" | jq -r '
-                  .included[]? |
-                  select(.type=="plans") |
-                  .id
-                ' | head -n1)
-
-                break
-              fi
-            done
-
-            if [ -n "$found_run" ]; then
-              break
-            fi
-
-            echo "Run not ready yet, retrying in 5s..."
-            sleep 5
-          done
-
-          if [ -z "$found_run" ] || [ -z "$found_plan" ]; then
-            echo "No matching Terraform run/plan found"
-            exit 1
-          fi
-
-          echo "Found run: $found_run"
-          echo "Waiting for Terraform plan to finish..."
-
-          for i in {1..60}; do
-            run_check=$(curl -s "${auth_header[@]}" \
-              "${TF_API_URL}/runs/${found_run}")
-
-            run_status=$(echo "$run_check" | jq -r '.data.attributes.status')
-
-            echo "Current status: $run_status"
-
-            case "$run_status" in
-              planned|cost_estimated|policy_checked|confirmed)
-                echo "Plan is ready"
-                break
-                ;;
-              errored|canceled)
-                echo "Run failed with status: $run_status"
-                exit 1
-                ;;
-            esac
-
-            sleep 5
-          done
-          echo "Found plan: $found_plan"
-
-          echo ""
-          echo "=============================="
-          echo "Terraform Plan Summary"
-          echo "=============================="
-
-          plan_json=$(curl -sL "${auth_header[@]}" \
-            "${TF_API_URL}/plans/${found_plan}/json-output")
-
-          echo "$plan_json" | jq -r '
-            .resource_changes[]
-            | select(.change.actions | index("no-op") | not)
-            | "\(.address) => \(.change.actions | join(","))"
-          '
-
-          echo ""
-          echo "=============================="
-          echo "Full change counts"
-          echo "=============================="
-
-          echo "$plan_json" | jq -r '
-            [.resource_changes[].change.actions[]]
-            | group_by(.)
-            | map({action: .[0], count: length})
-          '
-
-  apply:
-    name: Run Terraform Cloud Apply
-    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'apply' || github.event.inputs.action == '') }}
-    runs-on: ubuntu-latest
-    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
 
-      - name: Find workspace and run, then apply
-        env:
-          TF_API_TOKEN_APPLY: ${{ secrets.TF_API_TOKEN_APPLY }}
-          TF_API_URL: ${{ env.TF_API_URL }}
-          TF_ORG: ${{ env.TF_ORG }}
-          TF_WORKSPACE: ${{ env.TF_WORKSPACE }}
-          RUN_ID_INPUT: ${{ github.event.inputs.run_id || '' }}
-          COMMIT_INPUT: ${{ github.event.inputs.commit_sha || '' }}
-        run: |
-          set -euo pipefail
-          if [ -z "${TF_API_TOKEN_APPLY}" ]; then
-            echo "TF_API_TOKEN_APPLY secret is required to apply runs in Terraform Cloud"
-            exit 1
-          fi
+      - name: Terraform Init
+        run: terraform init
 
-          auth_header=( -H "Authorization: Bearer ${TF_API_TOKEN_APPLY}" -H "Content-Type: application/vnd.api+json" )
+      - name: Terraform Format Check
+        continue-on-error: true
+        run: terraform fmt --check
 
-          echo "Fetching workspace '${TF_WORKSPACE}' in org '${TF_ORG}'"
-          ws_resp=$(curl -s "${auth_header[@]}" "${TF_API_URL}/organizations/${TF_ORG}/workspaces/${TF_WORKSPACE}")
-          WS_ID=$(echo "$ws_resp" | jq -r '.data.id')
-          if [ -z "$WS_ID" ] || [ "$WS_ID" = "null" ]; then
-            echo "Workspace not found. Response: $ws_resp"
-            exit 1
-          fi
+      - name: Terraform Validate
+        run: terraform validate
 
-          RUN_ID="${RUN_ID_INPUT}"
-          if [ -z "$RUN_ID" ]; then
-            GITHUB_SHA="${COMMIT_INPUT:-${GITHUB_SHA}}"
-            echo "Looking for run for commit ${GITHUB_SHA}"
-            found_run=""
-            runs=$(curl -s "${auth_header[@]}" "${TF_API_URL}/runs?filter[workspace]=${WS_ID}&page[size]=20")
-            for run_id in $(echo "$runs" | jq -r '.data[].id'); do
-              run_json=$(curl -s "${auth_header[@]}" "${TF_API_URL}/runs/${run_id}?include=configuration-version,plan")
-              commit_sha=$(echo "$run_json" | jq -r '.included[]? | select(.type=="configuration-versions") | .attributes.ingress-attributes.vcs-revision // .attributes.ingress-attributes.commit_sha // .attributes.ingress-attributes."vcs-revision" // empty' | head -n1)
-              if [ -n "$commit_sha" ] && [ "$commit_sha" = "$GITHUB_SHA" ]; then
-                found_run=$run_id
-                found_run_json="$run_json"
-                break
-              fi
-            done
-            if [ -z "$found_run" ]; then
-              echo "No matching run found for commit ${GITHUB_SHA}. Exiting.";
-              exit 1
-            fi
-            RUN_ID="$found_run"
-          fi
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
 
-          echo "Applying run ${RUN_ID}"
-          apply_resp=$(curl -s -X POST "${auth_header[@]}" "${TF_API_URL}/runs/${RUN_ID}/actions/apply" -d '{"data":{}}')
-          echo "Apply response: $apply_resp"
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: tfplan
 
-  destroy:
-    name: Run Terraform Cloud Destroy
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy' }}
+  terraform-apply:
+    name: Terraform Apply
+    needs: terraform-plan
     runs-on: ubuntu-latest
-    environment: production
+
+    environment:
+      name: production
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
 
-      - name: Create destroy run and apply
-        env:
-          TF_API_TOKEN_APPLY: ${{ secrets.TF_API_TOKEN_APPLY }}
-          TF_API_URL: ${{ env.TF_API_URL }}
-          TF_ORG: ${{ env.TF_ORG }}
-          TF_WORKSPACE: ${{ env.TF_WORKSPACE }}
-        run: |
-          set -euo pipefail
-          if [ -z "${TF_API_TOKEN_APPLY}" ]; then
-            echo "TF_API_TOKEN_APPLY secret is required to create destroy runs in Terraform Cloud"
-            exit 1
-          fi
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
 
-          auth_header=( -H "Authorization: Bearer ${TF_API_TOKEN_APPLY}" -H "Content-Type: application/vnd.api+json" )
+      - name: Terraform Init
+        run: terraform init
 
-          echo "Fetching workspace '${TF_WORKSPACE}' in org '${TF_ORG}'"
-          ws_resp=$(curl -s "${auth_header[@]}" "${TF_API_URL}/organizations/${TF_ORG}/workspaces/${TF_WORKSPACE}")
-          WS_ID=$(echo "$ws_resp" | jq -r '.data.id')
-          if [ -z "$WS_ID" ] || [ "$WS_ID" = "null" ]; then
-            echo "Workspace not found. Response: $ws_resp"
-            exit 1
-          fi
-
-          echo "Creating destroy run for workspace $WS_ID"
-          payload=$(jq -n --arg ws "$WS_ID" '{data:{type:"runs",attributes:{"is-destroy":true,"message":"Destroy triggered via GitHub Actions"},relationships:{workspace:{data:{type:"workspaces",id:$ws}}}}}')
-          create_resp=$(curl -s -X POST "${auth_header[@]}" -d "$payload" "${TF_API_URL}/runs")
-          run_id=$(echo "$create_resp" | jq -r '.data.id')
-          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
-            echo "Failed to create destroy run. Response: $create_resp"
-            exit 1
-          fi
-          echo "Created destroy run: $run_id"
-
-          echo "Applying destroy run ${run_id}"
-          apply_resp=$(curl -s -X POST "${auth_header[@]}" "${TF_API_URL}/runs/${run_id}/actions/apply" -d '{"data":{}}')
-          echo "Apply response: $apply_resp"
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
