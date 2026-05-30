@@ -20,7 +20,7 @@ write_files:
   - path: /etc/sysctl.d/99-custom.conf
     content: |
       net.ipv4.ip_forward=0
-      net.ipv6.conf.all.forwarding=0
+      net.ipv4.conf.all.forwarding=0
 runcmd:
   - [ sh, -c, "ufw default deny incoming" ]
   - [ sh, -c, "ufw allow ssh" ]

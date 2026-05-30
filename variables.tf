@@ -29,3 +29,12 @@ variable "instance_count" {
   default = 3
 }
 
+variable "ipv4_enabled" {
+  type    = bool
+  default = true
+}
+
+variable "ipv6_enabled" {
+  type    = bool
+  default = true
+}

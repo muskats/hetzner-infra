@@ -17,3 +17,11 @@ variable "ssh_key_name" {
 variable "image" {
   type = string
 }
+
+variable "ipv4_enabled" {
+  type = bool
+}
+
+variable "ipv6_enabled" {
+  type = bool
+}
