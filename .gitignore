@@ -5,3 +5,5 @@ terraform.tfstate.backup
 *.tfvars
 terraform.tfvars
 credentials.tfrc.json
+kubeconfig
+*.log

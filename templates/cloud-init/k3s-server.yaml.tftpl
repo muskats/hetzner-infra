@@ -12,7 +12,6 @@ write_files:
       token: ${cluster_token}
       node-ip: ${node_ip}
       advertise-address: ${node_ip}
-      flannel-iface: ${private_interface}
       write-kubeconfig-mode: "0644"
 
 runcmd:

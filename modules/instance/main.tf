@@ -1,6 +1,6 @@
 resource "hcloud_server" "this" {
   count       = var.instance_count
-  name = count.index == 0 ? "node" : "worker${count.index - 1}"
+  name        = count.index == 0 ? "node" : "worker${count.index - 1}"
   server_type = var.server_type
 
   public_net {
