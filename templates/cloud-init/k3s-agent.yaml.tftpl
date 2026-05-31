@@ -1,0 +1,17 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - curl
+  - ca-certificates
+
+write_files:
+  - path: /etc/rancher/k3s/config.yaml
+    permissions: "0644"
+    content: |
+      token: ${cluster_token}
+      server: https://${server_ip}:6443
+      node-ip: ${node_ip}
+
+runcmd:
+  - [ sh, -c, "set -euxo pipefail; curl -fsSL https://get.k3s.io -o /root/get-k3s.sh; INSTALL_K3S_VERSION=${k3s_version} sh /root/get-k3s.sh agent" ]

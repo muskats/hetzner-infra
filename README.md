@@ -1,64 +1,108 @@
 # Hetzner Infrastructure
 
-A Terraform-based infrastructure provisioning project for deploying and managing cloud resources on Hetzner Cloud.
+Terraform-based infrastructure project for building a reproducible Hetzner K3s foundation.
 
-This repository represents a **real-world infrastructure-as-code (IaC) system** designed to provision reproducible, cost-efficient cloud environments using Hetzner as the underlying compute provider.
+This repository provisions infrastructure and node bootstrap only.  
+Platform add-ons and workload-level tooling belong in a separate GitOps repository.
 
 ---
 
 ## Overview
 
-This project provisions and manages cloud infrastructure using a declarative Infrastructure-as-Code (Terraform) approach.
+This project provisions a private-networked Kubernetes base layer on Hetzner Cloud with Terraform and cloud-init.
 
 It focuses on:
-- Repeatable server provisioning
-- Network and firewall configuration
-- Secure remote access via SSH
-- Environment consistency through Terraform state management
+- Deterministic infrastructure provisioning
+- Private networking between nodes
+- Automatic K3s bootstrap during first boot
+- Reproducible rebuilds (destroy/apply)
+- Clear separation between infra and platform lifecycle
 
-The infrastructure is currently deployable in a **single Hetzner region**, optimised for cost-efficiency and simplicity rather than multi-region redundancy.
+### Scope
+
+This repository manages:
+
+- Network
+- Instances
+- SSH key registration
+- Cloud-init rendering
+- K3s bootstrap at node creation time
+
+This repository does **not** manage:
+
+- Application workloads
+- Helm releases for platform services
+- Continuous cluster operations tooling (Flux/Argo CD, observability stack, ingress controllers)
+
+Those belong in a separate platform/GitOps repository.
+
+---
+
+## Architecture
+
+Terraform -> Hetzner infrastructure -> private network attachment -> cloud-init bootstrap -> K3s control plane + workers
+
+Key principles:
+
+- No Ansible orchestration
+- No SSH-based post-provision automation in CI
+- Bootstrap happens via `user_data` at creation time
+- Infrastructure lifecycle remains in Terraform
+- Platform lifecycle is intended to move to GitOps
 
 ---
 
 ## Project Structure
 
-This repository follows a modular layout to separate concerns between infrastructure components, configuration, and reusable modules. This is intentionally designed to support future scaling (e.g. multi-environment), updates, and Kubernetes-based platform layers.
-
-## Layout
+### Layout
 
 ````shell
 .
 ├── README.md
-├── backend.tf              # Remote state backend configuration - HCP Terraform 
-├── main.tf                 # Orchestration layer - Root
-├── provider.tf             # Provider configuration (+ authentication context) - Hetzner
-├── variables.tf            # Input variables - Root
-├── outputs.tf              # Outputs - Root: node IPs
+├── backend.tf                  # Remote state backend configuration
+├── main.tf                     # Root orchestration
+├── provider.tf                 # Hetzner provider configuration
+├── variables.tf                # Root inputs
+├── locals.tf                   # Root computed values (e.g. deterministic node IPs)
+├── outputs.tf                  # Root outputs (role-based inventory)
 
 ├── modules
+│   ├── cloudinit
+│   │   ├── main.tf             # Renders role-specific user_data
+│   │   ├── variables.tf        # Cloud-init module inputs
+│   │   ├── outputs.tf          # Rendered user_data output
+│   │   └── provider.tf         # Required provider declaration
+
 │   ├── instance
-│   │   ├── main.tf        # Nodes - VM provisioning
-│   │   ├── variables.tf   # Input variables - Module: configuration inputs
-│   │   ├── outputs.tf     # Outputs - Node: node IPs and names
-│   │   └── provider.tf    # Required provider (to avoid false registry.terraform.io/hashicorp/...). Version is managed at root
+│   │   ├── main.tf             # VM creation and network attachment
+│   │   ├── variables.tf        # Instance module inputs
+│   │   ├── outputs.tf          # Instance IDs, names, IPs
+│   │   └── provider.tf         # Required provider declaration
+
+│   ├── network
+│   │   ├── main.tf             # Hetzner network and subnet resources
+│   │   ├── variables.tf        # Network module inputs
+│   │   ├── outputs.tf          # Network outputs
+│   │   └── provider.tf         # Required provider declaration
 
 │   └── ssh
-│       ├── main.tf        # SSH - Public key lifecycle
-│       ├── variables.tf   # Input variables - Module: configuration inputs
-│       ├── outputs.tf     # Outputs - SSH: Public key
-│       └── provider.tf    # Required provider (to avoid false registry.terraform.io/hashicorp/...). Version is managed at root
+│       ├── main.tf             # Hetzner SSH key resource
+│       ├── variables.tf        # SSH module inputs
+│       ├── outputs.tf          # SSH key outputs
+│       └── provider.tf         # Required provider declaration
 
 ├── templates
 │   └── cloud-init
-│       └── os-hardening.tpl   # Cloud-init bootstrap template used for initial VM hardening and baseline OS configuration
+│       ├── k3s-server.yaml.tftpl   # Control plane bootstrap template
+│       └── k3s-agent.yaml.tftpl    # Worker bootstrap template
 ````
-
 ---
 
-## Notes
+## Outputs
+Role-oriented outputs are exposed for operational handoff:
 
-> This is a single-region deployment.
->
-> The limitation is intentional due to:
-> - Hobby project budget constraints
-> - General limitations in Hetzner infrastructure availability at the time of creating this project
+ - **Control-plane** name and it's private IP
+ - **Worker names** and their respective private IPs
+ - **Node inventory** object for downstream automation
+ - **Sensitive artifacts** (e.g. kubeconfig) are intentionally not exported as Terraform outputs.
+

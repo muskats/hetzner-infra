@@ -38,3 +38,32 @@ variable "ipv6_enabled" {
   type    = bool
   default = true
 }
+
+variable "network_name" {
+  type    = string
+  default = "k8s-network"
+}
+
+variable "network_id" {
+  type    = number
+  default = null
+}
+variable "ip_range" {
+  type    = string
+  default = "10.0.0.0/16"
+}
+
+variable "network_zone" {
+  type    = string
+  default = "eu-central"
+}
+
+variable "subnet_ip_range" {
+  type    = string
+  default = "10.0.1.0/24"
+}
+
+variable "K3_TOKEN" {
+  type      = string
+  sensitive = true
+}

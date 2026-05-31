@@ -25,3 +25,21 @@ variable "ipv4_enabled" {
 variable "ipv6_enabled" {
   type = bool
 }
+
+variable "network_id" {
+  type    = number
+  default = null
+}
+
+variable "private_network_cidr" {
+  type    = string
+  default = null
+}
+
+variable "user_data_per_node" {
+  type = list(string)
+}
+
+variable "private_ips" {
+  type = list(string)
+}
