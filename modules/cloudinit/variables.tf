@@ -16,3 +16,8 @@ variable "private_interface" {
   type    = string
   default = "eth1"
 }
+
+variable "tailscale_auth_key" {
+  type      = string
+  sensitive = true
+}

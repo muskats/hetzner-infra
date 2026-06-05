@@ -40,8 +40,10 @@ module "instance" {
 }
 
 module "cloudinit" {
-  source            = "./modules/cloudinit"
-  private_ips       = local.node_private_ips
-  cluster_token     = var.K3_TOKEN
-  private_interface = "eth1"
+  source             = "./modules/cloudinit"
+  private_ips        = local.node_private_ips
+  cluster_token      = var.K3_TOKEN
+  private_interface  = "eth1"
+  tailscale_auth_key = var.tailscale_auth_key
 }
+

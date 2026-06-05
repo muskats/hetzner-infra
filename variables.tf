@@ -67,3 +67,8 @@ variable "K3_TOKEN" {
   type      = string
   sensitive = true
 }
+
+variable "tailscale_auth_key" {
+  type      = string
+  sensitive = true
+}

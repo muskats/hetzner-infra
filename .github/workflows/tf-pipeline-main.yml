@@ -13,9 +13,9 @@ jobs:
 
     env:
       TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
-
       TF_VAR_HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       TF_VAR_HCLOUD_SSH_PUBLIC: ${{ secrets.HCLOUD_SSH_PUBLIC }}
+      TF_VAR_tailscale_auth_key: ${{ secrets.TSKEY_AUTH }}
 
     steps:
       - name: Checkout
@@ -55,9 +55,9 @@ jobs:
 
     env:
       TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
-
       TF_VAR_HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       TF_VAR_HCLOUD_SSH_PUBLIC: ${{ secrets.HCLOUD_SSH_PUBLIC }}
+      TF_VAR_tailscale_auth_key: ${{ secrets.TSKEY_AUTH }}
 
     steps:
       - name: Checkout
