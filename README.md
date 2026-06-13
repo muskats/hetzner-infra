@@ -2,23 +2,42 @@
 
 Terraform-based infrastructure project for building a reproducible Hetzner K3s foundation.
 
-This repository provisions infrastructure and node bootstrap only.  
-Platform add-ons and workload-level tooling belong in a separate GitOps repository.
+This repository owns infrastructure provisioning, node bootstrap, Tailscale enrollment, and the initial Flux bootstrap. The GitOps repository owns day-2 cluster state only.
 
 ---
 
 ## Overview
 
-This project provisions a private-networked Kubernetes base layer on Hetzner Cloud with Terraform and cloud-init.
+- Provisions Hetzner Cloud network and servers
+- Boots K3s on first boot with cloud-init
+- Enrolls nodes in the Tailscale tailnet for private operator access
+- Installs Flux on the control plane
+- Points Flux at the public GitOps repository
 
-It focuses on:
-- Deterministic infrastructure provisioning
-- Private networking between nodes
-- Automatic K3s bootstrap during first boot
-- Reproducible rebuilds (destroy/apply)
-- Clear separation between infra and platform lifecycle
+The current GitOps repository is:
 
-### Scope
+- `https://github.com/muskats/hetzner-platform`
+
+Flux tracks:
+
+- branch: `main`
+- path: `./clusters/hetzner-k3s`
+
+---
+
+## Bootstrap Flow
+
+1. Terraform provisions the Hetzner network, SSH key, and servers.
+2. Cloud-init installs K3s on the control plane and workers.
+3. Cloud-init joins every node to the Tailscale tailnet.
+4. The control plane installs Flux.
+5. Flux syncs the GitOps repository and reconciles the cluster overlay.
+
+This flow has been validated on a three-node cluster: one control plane and two workers.
+
+---
+
+## Scope
 
 This repository manages:
 
@@ -26,83 +45,90 @@ This repository manages:
 - Instances
 - SSH key registration
 - Cloud-init rendering
-- K3s bootstrap at node creation time
+    - K3s day-0 bootstrap
+    - Tailscale node enrollment
+    - Flux bootstrap
 
 This repository does **not** manage:
 
 - Application workloads
-- Helm releases for platform services
-- Continuous cluster operations tooling (Flux/Argo CD, observability stack, ingress controllers)
+- Platform add-ons and cluster state
+- Secret material committed to Git
 
-Those belong in a separate platform/GitOps repository.
-
----
-
-## Architecture
-
-Terraform -> Hetzner infrastructure -> private network attachment -> cloud-init bootstrap -> K3s control plane + workers
-
-Key principles:
-
-- No Ansible orchestration
-- No SSH-based post-provision automation in CI
-- Bootstrap happens via `user_data` at creation time
-- Infrastructure lifecycle remains in Terraform
-- Platform lifecycle is intended to move to GitOps
+Those belong in the separate GitOps repository.
 
 ---
 
-## Project Structure
+## Repository Layout
 
-### Layout
-
-````shell
+```text
 .
-├── README.md
-├── backend.tf                  # Remote state backend configuration
-├── main.tf                     # Root orchestration
-├── provider.tf                 # Hetzner provider configuration
-├── variables.tf                # Root inputs
-├── locals.tf                   # Root computed values (e.g. deterministic node IPs)
-├── outputs.tf                  # Root outputs (role-based inventory)
-
+├── backend.tf
+├── main.tf
+├── outputs.tf
+├── provider.tf
+├── variables.tf
+├── locals.tf
 ├── modules
 │   ├── cloudinit
-│   │   ├── main.tf             # Renders role-specific user_data
-│   │   ├── variables.tf        # Cloud-init module inputs
-│   │   ├── outputs.tf          # Rendered user_data output
-│   │   └── provider.tf         # Required provider declaration
-
 │   ├── instance
-│   │   ├── main.tf             # VM creation and network attachment
-│   │   ├── variables.tf        # Instance module inputs
-│   │   ├── outputs.tf          # Instance IDs, names, IPs
-│   │   └── provider.tf         # Required provider declaration
-
 │   ├── network
-│   │   ├── main.tf             # Hetzner network and subnet resources
-│   │   ├── variables.tf        # Network module inputs
-│   │   ├── outputs.tf          # Network outputs
-│   │   └── provider.tf         # Required provider declaration
-
 │   └── ssh
-│       ├── main.tf             # Hetzner SSH key resource
-│       ├── variables.tf        # SSH module inputs
-│       ├── outputs.tf          # SSH key outputs
-│       └── provider.tf         # Required provider declaration
+└── templates
+    └── cloud-init
+        ├── flux-bootstrap.yaml.tftpl
+        ├── k3s-agent.yaml.tftpl
+        └── k3s-server.yaml.tftpl
+```
 
-├── templates
-│   └── cloud-init
-│       ├── k3s-server.yaml.tftpl   # Control plane bootstrap template
-│       └── k3s-agent.yaml.tftpl    # Worker bootstrap template
-````
 ---
 
-## Outputs
-Role-oriented outputs are exposed for operational handoff:
+## Runtime Inputs
 
- - **Control-plane** name and it's private IP
- - **Worker names** and their respective private IPs
- - **Node inventory** object for downstream automation
- - **Sensitive artifacts** (e.g. kubeconfig) are intentionally not exported as Terraform outputs.
+Provide these through the pipeline or environment, not in Git:
 
+- `HCLOUD_TOKEN`
+- `HCLOUD_SSH_PUBLIC`
+- `K3_TOKEN`
+- `TSKEY_AUTH`
+
+The GitHub Actions workflows map these into Terraform variables.
+
+---
+
+## Validation
+
+### Working directory
+Run after changes:
+
+```bash
+terraform fmt -recursive
+terraform validate
+terraform plan
+```
+
+### Infrastucture
+Run on the control plane after apply:
+
+```bash
+k3s kubectl get nodes -o wide
+tailscale status
+k3s kubectl -n flux-system get gitrepositories,kustomizations,helmreleases,helmrepositories -o wide
+```
+
+Pass criteria:
+
+- all K3s nodes are `Ready`
+- the node is connected to the tailnet
+- `gitrepository/flux-system` is `Ready=True`
+- `kustomization/hetzner-platform` is `Ready=True`
+- `kustomization/apps` is `Ready=True`
+
+---
+
+## Notes
+
+- Cloud-init is the day-0 bootstrap mechanism.
+- Flux is installed on the control plane and pulls the GitOps repository directly.
+- The GitOps repository remains the source of truth for day-2 state.
+- If Flux stays in `Reconciling`, the issue is usually in the GitOps repository rather than this repo.
